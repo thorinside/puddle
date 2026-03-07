@@ -29,6 +29,10 @@ float effectiveSampleRate() {
         : kDefaultSampleRateHz;
     return std::min(raw, kMaxSupportedSampleRateHz);
 }
+
+uint32_t requiredDelayBytes(float sampleRate) {
+    return PuddleDSP::requiredDelayBufferSamples(sampleRate) * sizeof(float);
+}
 }
 
 static const _NT_parameter parameters[] = {
@@ -82,7 +86,7 @@ void calculateRequirements(_NT_algorithmRequirements& req, const int32_t* specif
 
     req.numParameters = ARRAY_SIZE(parameters);
     req.sram = sizeof(_puddleAlgorithm);
-    req.dram = PuddleDSP::requiredDelayBufferSamples(kMaxSupportedSampleRateHz) * sizeof(float);
+    req.dram = requiredDelayBytes(effectiveSampleRate());
     req.dtc = 0;
     req.itc = 0;
 }
@@ -109,7 +113,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.volume = 1.0f;
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 
-    const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(kMaxSupportedSampleRateHz);
+    const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(sampleRate);
     alg->dsp.initialize(config, reinterpret_cast<float*>(ptrs.dram), delaySamples);
     return alg;
 }

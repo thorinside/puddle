@@ -19,9 +19,9 @@ ifeq ($(TARGET),hardware)
 	CXX := $(ARM_TOOLCHAIN)g++
 	CXXFLAGS := -std=gnu++14 -mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb
 	CXXFLAGS += -Os -Wall -ffunction-sections -fdata-sections
-	CXXFLAGS += -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables
+	CXXFLAGS += -fPIC -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables
 	CXXFLAGS += -DPUDDLE_NO_HEAP -I. -I$(API_PATH)/include
-	LDFLAGS := -Wl,--relocatable -nostdlib
+	LDFLAGS := -r
 	OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).o
 	CHECK_CMD := $(ARM_TOOLCHAIN)nm $(OUTPUT) | grep ' U ' || echo "No undefined symbols"
 	SIZE_CMD := $(ARM_TOOLCHAIN)size -A $(OUTPUT)
@@ -79,9 +79,18 @@ $(BUILD_DIR)/$(TEST_NAME): $(UNIT_TEST_SOURCES) $(DSP_LIB).h | $(BUILD_DIR)
 test: $(BUILD_DIR)/$(TEST_NAME)
 	./$(BUILD_DIR)/$(TEST_NAME)
 
-$(OUTPUT): $(PLUGIN_SOURCES) $(DSP_LIB).h | $(BUILD_DIR) $(PLUGIN_DIR)
+HARDWARE_OBJECTS := $(BUILD_DIR)/nt_puddle.arm.o $(BUILD_DIR)/$(DSP_LIB).arm.o
+
+$(BUILD_DIR)/nt_puddle.arm.o: nt_puddle.cpp $(DSP_LIB).h | $(BUILD_DIR)
 	@test -d $(API_PATH)/include || (echo "Missing Disting NT API headers at $(API_PATH)/include"; exit 1)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(PLUGIN_SOURCES)
+	$(CXX) $(CXXFLAGS) -c nt_puddle.cpp -o $@
+
+$(BUILD_DIR)/$(DSP_LIB).arm.o: $(DSP_LIB).cpp $(DSP_LIB).h | $(BUILD_DIR)
+	@test -d $(API_PATH)/include || (echo "Missing Disting NT API headers at $(API_PATH)/include"; exit 1)
+	$(CXX) $(CXXFLAGS) -c $(DSP_LIB).cpp -o $@
+
+$(OUTPUT): $(HARDWARE_OBJECTS) | $(PLUGIN_DIR)
+	$(CXX) $(LDFLAGS) -o $@ $(HARDWARE_OBJECTS)
 
 hardware:
 	@$(MAKE) TARGET=hardware $(OUTPUT)

@@ -19,8 +19,27 @@ uint32_t roundToUInt(float value) {
     return static_cast<uint32_t>(value + 0.5f);
 }
 
-float expFromDouble(float value) {
-    return static_cast<float>(std::exp(static_cast<double>(value)));
+float expApproxNegative(float value) {
+    // All current call sites feed negative coefficients. Keep the approximation simple
+    // and self-contained so the plugin does not depend on libm symbols at load time.
+    if (value >= 0.0f) {
+        return 1.0f;
+    }
+    if (value <= -10.0f) {
+        return 0.0f;
+    }
+
+    const float x = value * 0.125f;
+    const float x2 = x * x;
+    const float poly =
+        1.0f + x + (0.5f * x2) + ((x2 * x) * (1.0f / 6.0f)) +
+        ((x2 * x2) * (1.0f / 24.0f)) + ((x2 * x2 * x) * (1.0f / 120.0f));
+
+    float result = poly;
+    result *= result;
+    result *= result;
+    result *= result;
+    return std::max(0.0f, result);
 }
 }
 
@@ -132,14 +151,14 @@ void PuddleDSP::updateRandomSlew() {
     const float slewTimeMs =
         kMinSlewTimeMs + (m_config.damp * (kMaxSlewTimeMs - kMinSlewTimeMs));
     const float slewSamples = std::max(1.0f, slewTimeMs * m_config.sampleRate / 1000.0f);
-    m_randomCV.slewRate = 1.0f - expFromDouble(-1.0f / slewSamples);
+    m_randomCV.slewRate = 1.0f - expApproxNegative(-1.0f / slewSamples);
 }
 
 void PuddleDSP::updateEnvelopeCoefficients() {
     const float attackSamples = std::max(1.0f, kAttackTimeMs * m_config.sampleRate / 1000.0f);
     const float releaseSamples = std::max(1.0f, kReleaseTimeMs * m_config.sampleRate / 1000.0f);
-    m_envFollower.attackCoeff = 1.0f - expFromDouble(-1.0f / attackSamples);
-    m_envFollower.releaseCoeff = 1.0f - expFromDouble(-1.0f / releaseSamples);
+    m_envFollower.attackCoeff = 1.0f - expApproxNegative(-1.0f / attackSamples);
+    m_envFollower.releaseCoeff = 1.0f - expApproxNegative(-1.0f / releaseSamples);
 }
 
 void PuddleDSP::clearDelayBuffer() {
@@ -236,7 +255,7 @@ float PuddleDSP::filterSample(float input, float envLevel) {
         500.0f,
         nyquistLimitedMaxCutoff);
 
-    const float coeff = 1.0f - expFromDouble((-kTwoPi * cutoffHz) / m_config.sampleRate);
+    const float coeff = 1.0f - expApproxNegative((-kTwoPi * cutoffHz) / m_config.sampleRate);
     m_filter.state += coeff * (input - m_filter.state);
     return m_filter.state;
 }
