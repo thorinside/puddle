@@ -19,6 +19,18 @@ enum {
     kNumParams
 };
 
+namespace {
+constexpr float kDefaultSampleRateHz = 48000.0f;
+constexpr float kMaxSupportedSampleRateHz = 96000.0f;
+
+float effectiveSampleRate() {
+    const float raw = (NT_globals.sampleRate > 0U)
+        ? static_cast<float>(NT_globals.sampleRate)
+        : kDefaultSampleRateHz;
+    return std::min(raw, kMaxSupportedSampleRateHz);
+}
+}
+
 static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Input", 1, 1)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output", 1, 13)
@@ -68,13 +80,9 @@ static void accumulateProcessed(float* output,
 void calculateRequirements(_NT_algorithmRequirements& req, const int32_t* specifications) {
     (void)specifications;
 
-    const float sampleRate = (NT_globals.sampleRate > 0U)
-        ? static_cast<float>(NT_globals.sampleRate)
-        : 48000.0f;
-
     req.numParameters = ARRAY_SIZE(parameters);
     req.sram = sizeof(_puddleAlgorithm);
-    req.dram = PuddleDSP::requiredDelayBufferSamples(sampleRate) * sizeof(float);
+    req.dram = PuddleDSP::requiredDelayBufferSamples(kMaxSupportedSampleRateHz) * sizeof(float);
     req.dtc = 0;
     req.itc = 0;
 }
@@ -89,9 +97,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     alg->parameters = parameters;
     alg->parameterPages = &parameterPages;
 
-    const float sampleRate = (NT_globals.sampleRate > 0U)
-        ? static_cast<float>(NT_globals.sampleRate)
-        : 48000.0f;
+    const float sampleRate = effectiveSampleRate();
 
     PuddleDSP::Config config;
     config.sampleRate = sampleRate;
@@ -103,7 +109,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.volume = 1.0f;
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 
-    const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(sampleRate);
+    const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(kMaxSupportedSampleRateHz);
     alg->dsp.initialize(config, reinterpret_cast<float*>(ptrs.dram), delaySamples);
     return alg;
 }
