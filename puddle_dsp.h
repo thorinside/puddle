@@ -66,13 +66,26 @@ private:
         float modulationDepthHz = 12000.0f;
     };
 
+    struct SmoothedParameters {
+        float rate = 0.5f;
+        float damp = 0.5f;
+        float depth = 0.5f;
+        float lpg = 0.5f;
+        float mix = 0.5f;
+        float volume = 1.0f;
+        float coeff = 1.0f;
+    };
+
     static float clamp(float value, float minValue, float maxValue);
 
     void clearDelayBuffer();
     void updateDerivedState();
+    void updateParameterSmoothingCoeff();
     void updateRandomInterval();
     void updateRandomSlew();
     void updateEnvelopeCoefficients();
+    void syncSmoothedParameters();
+    void smoothParameters();
 
     float readDelay(float modulation) const;
     void writeDelay(float sample);
@@ -86,6 +99,7 @@ private:
     RandomCVGenerator m_randomCV;
     EnvelopeFollower m_envFollower;
     LowPassFilter m_filter;
+    SmoothedParameters m_smoothed;
 
 #ifndef PUDDLE_NO_HEAP
     std::vector<float> m_ownedDelayBuffer;

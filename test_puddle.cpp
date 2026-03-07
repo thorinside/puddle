@@ -81,6 +81,26 @@ void testParameterChanges() {
     std::cout << "Parameter change test passed\n";
 }
 
+void testParameterSmoothing() {
+    PuddleDSP dsp;
+    PuddleDSP::Config config = makeConfig();
+    config.mix = 0.0f;
+    config.volume = 1.0f;
+    dsp.initialize(config);
+
+    const uint32_t numSamples = 256U;
+    std::vector<float> input(numSamples, 1.0f);
+    std::vector<float> output(numSamples, 0.0f);
+
+    dsp.setVolume(0.0f);
+    dsp.process(input.data(), output.data(), numSamples);
+
+    assert(output.front() > 0.9f);
+    assert(output.back() < 0.7f);
+    assert(output.back() > 0.0f);
+    std::cout << "Parameter smoothing test passed\n";
+}
+
 void testDeterminism() {
     PuddleDSP dsp1;
     PuddleDSP dsp2;
@@ -149,6 +169,7 @@ int main() {
     testInitialization();
     testAudioProcessing();
     testParameterChanges();
+    testParameterSmoothing();
     testDeterminism();
     testExternalDelayStorage();
     testResetRewindsState();

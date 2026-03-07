@@ -22,9 +22,12 @@ enum {
 namespace {
 constexpr float kDefaultSampleRateHz = 48000.0f;
 constexpr float kMaxSupportedSampleRateHz = 96000.0f;
-constexpr int kMinVolumeDbTenths = -600;
-constexpr int kDefaultVolumeDbTenths = -100;
-constexpr int kMaxVolumeDbTenths = 240;
+constexpr int kMinPercentHundredths = 0;
+constexpr int kDefaultPercentHundredths = 5000;
+constexpr int kMaxPercentHundredths = 10000;
+constexpr int kMinVolumeDbHundredths = -6000;
+constexpr int kDefaultVolumeDbHundredths = -1000;
+constexpr int kMaxVolumeDbHundredths = 2400;
 constexpr float kLn10Over20 = 0.11512925464970228f;
 constexpr float kLn2 = 0.6931471805599453f;
 
@@ -59,20 +62,24 @@ float expApprox(float value) {
     return result;
 }
 
-float volumeDbTenthsToLinear(int valueTenthsDb) {
-    return expApprox(static_cast<float>(valueTenthsDb) * 0.1f * kLn10Over20);
+float percentHundredthsToUnit(int valueHundredths) {
+    return static_cast<float>(valueHundredths) * 0.0001f;
 }
 
-void formatTenthsDb(char* buffer, int valueTenthsDb) {
+float volumeDbHundredthsToLinear(int valueHundredthsDb) {
+    return expApprox(static_cast<float>(valueHundredthsDb) * 0.01f * kLn10Over20);
+}
+
+void formatHundredths(char* buffer, int valueHundredths) {
     char* out = buffer;
-    int value = valueTenthsDb;
+    int value = valueHundredths;
     if (value < 0) {
         *out++ = '-';
         value = -value;
     }
 
-    int whole = value / 10;
-    const int frac = value % 10;
+    int whole = value / 100;
+    const int frac = value % 100;
     char digits[8];
     int numDigits = 0;
     do {
@@ -85,7 +92,8 @@ void formatTenthsDb(char* buffer, int valueTenthsDb) {
     }
 
     *out++ = '.';
-    *out++ = static_cast<char>('0' + frac);
+    *out++ = static_cast<char>('0' + (frac / 10));
+    *out++ = static_cast<char>('0' + (frac % 10));
     *out = '\0';
 }
 }
@@ -94,13 +102,18 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Input", 1, 1)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output", 1, 13)
 
-    { .name = "RATE", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "DAMP", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "DEPTH", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "LPG", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "MIX", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "VOLUME", .min = kMinVolumeDbTenths, .max = kMaxVolumeDbTenths,
-      .def = kDefaultVolumeDbTenths, .unit = kNT_unitDb, .scaling = kNT_scaling10 },
+    { .name = "RATE", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "DAMP", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "DEPTH", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "LPG", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "MIX", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "VOLUME", .min = kMinVolumeDbHundredths, .max = kMaxVolumeDbHundredths,
+      .def = kDefaultVolumeDbHundredths, .unit = kNT_unitDb, .scaling = kNT_scaling100 },
 };
 
 static const uint8_t pageMain[] = {
@@ -171,7 +184,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.depth = 0.5f;
     config.lpg = 0.5f;
     config.mix = 0.5f;
-    config.volume = volumeDbTenthsToLinear(kDefaultVolumeDbTenths);
+    config.volume = volumeDbHundredthsToLinear(kDefaultVolumeDbHundredths);
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 
     const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(sampleRate);
@@ -184,22 +197,22 @@ void parameterChanged(_NT_algorithm* self, int p) {
 
     switch (p) {
     case kParamRate:
-        pThis->dtc->dsp.setRate(pThis->v[kParamRate] / 100.0f);
+        pThis->dtc->dsp.setRate(percentHundredthsToUnit(pThis->v[kParamRate]));
         break;
     case kParamDamp:
-        pThis->dtc->dsp.setDamp(pThis->v[kParamDamp] / 100.0f);
+        pThis->dtc->dsp.setDamp(percentHundredthsToUnit(pThis->v[kParamDamp]));
         break;
     case kParamDepth:
-        pThis->dtc->dsp.setDepth(pThis->v[kParamDepth] / 100.0f);
+        pThis->dtc->dsp.setDepth(percentHundredthsToUnit(pThis->v[kParamDepth]));
         break;
     case kParamLpg:
-        pThis->dtc->dsp.setLpg(pThis->v[kParamLpg] / 100.0f);
+        pThis->dtc->dsp.setLpg(percentHundredthsToUnit(pThis->v[kParamLpg]));
         break;
     case kParamMix:
-        pThis->dtc->dsp.setMix(pThis->v[kParamMix] / 100.0f);
+        pThis->dtc->dsp.setMix(percentHundredthsToUnit(pThis->v[kParamMix]));
         break;
     case kParamVolume:
-        pThis->dtc->dsp.setVolume(volumeDbTenthsToLinear(pThis->v[kParamVolume]));
+        pThis->dtc->dsp.setVolume(volumeDbHundredthsToLinear(pThis->v[kParamVolume]));
         break;
     default:
         break;
@@ -230,30 +243,30 @@ bool draw(_NT_algorithm* self) {
 
     NT_drawText(0, 8, "Puddle", 15, kNT_textLeft, kNT_textLarge);
 
-    char buf[16];
+    char buf[24];
 
     NT_drawText(0, 24, "RATE:");
-    NT_intToString(buf, pThis->v[kParamRate]);
+    formatHundredths(buf, pThis->v[kParamRate]);
     NT_drawText(40, 24, buf);
 
     NT_drawText(128, 24, "DAMP:");
-    NT_intToString(buf, pThis->v[kParamDamp]);
+    formatHundredths(buf, pThis->v[kParamDamp]);
     NT_drawText(168, 24, buf);
 
     NT_drawText(0, 36, "DEPTH:");
-    NT_intToString(buf, pThis->v[kParamDepth]);
+    formatHundredths(buf, pThis->v[kParamDepth]);
     NT_drawText(48, 36, buf);
 
     NT_drawText(128, 36, "LPG:");
-    NT_intToString(buf, pThis->v[kParamLpg]);
+    formatHundredths(buf, pThis->v[kParamLpg]);
     NT_drawText(160, 36, buf);
 
     NT_drawText(0, 48, "MIX:");
-    NT_intToString(buf, pThis->v[kParamMix]);
+    formatHundredths(buf, pThis->v[kParamMix]);
     NT_drawText(32, 48, buf);
 
     NT_drawText(128, 48, "VOL:");
-    formatTenthsDb(buf, pThis->v[kParamVolume]);
+    formatHundredths(buf, pThis->v[kParamVolume]);
     NT_drawText(160, 48, buf);
 
     return false;
