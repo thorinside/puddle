@@ -302,7 +302,7 @@ static void accumulateProcessed(float* output,
 }
 
 static const _NT_factory factory = {
-    .guid = NT_MULTICHAR('P', 'D', 'D', 'L'),
+    .guid = NT_MULTICHAR('T', 'h', 'P', 'd'),
     .name = "Puddle",
     .description = "K-Field modulator emulation",
     .calculateRequirements = calculateRequirements,
