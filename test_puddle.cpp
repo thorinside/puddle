@@ -30,6 +30,15 @@ std::vector<float> makeSine(uint32_t numSamples, float sampleRate, float frequen
     }
     return signal;
 }
+
+float windowPeak(const std::vector<float>& signal, uint32_t start, uint32_t end) {
+    float peak = 0.0f;
+    end = std::min<uint32_t>(end, static_cast<uint32_t>(signal.size()));
+    for (uint32_t i = start; i < end; ++i) {
+        peak = std::max(peak, std::fabs(signal[i]));
+    }
+    return peak;
+}
 }
 
 void testInitialization() {
@@ -101,6 +110,48 @@ void testParameterSmoothing() {
     std::cout << "Parameter smoothing test passed\n";
 }
 
+void testLpgShapesWetTails() {
+    PuddleDSP dryLpg;
+    PuddleDSP strongLpg;
+
+    PuddleDSP::Config base = makeConfig();
+    base.depth = 0.0f;
+    base.mix = 1.0f;
+    base.volume = 1.0f;
+    base.lpg = 0.0f;
+
+    PuddleDSP::Config lpgHeavy = base;
+    lpgHeavy.lpg = 1.0f;
+
+    dryLpg.initialize(base);
+    strongLpg.initialize(lpgHeavy);
+
+    const uint32_t numSamples = 4096U;
+    std::vector<float> input(numSamples, 0.0f);
+    std::vector<float> outDry(numSamples, 0.0f);
+    std::vector<float> outLpg(numSamples, 0.0f);
+    input[0] = 1.0f;
+
+    dryLpg.process(input.data(), outDry.data(), numSamples);
+    strongLpg.process(input.data(), outLpg.data(), numSamples);
+
+    const float firstEchoDry = windowPeak(outDry, 1600U, 1900U);
+    const float secondEchoDry = windowPeak(outDry, 3300U, 3600U);
+    const float firstEchoLpg = windowPeak(outLpg, 1600U, 1900U);
+    const float secondEchoLpg = windowPeak(outLpg, 3300U, 3600U);
+
+    assert(firstEchoDry > 0.01f);
+    assert(firstEchoLpg > 0.01f);
+    assert(secondEchoDry > 0.0001f);
+    assert(secondEchoLpg > 0.0001f);
+
+    const float dryRatio = firstEchoDry / secondEchoDry;
+    const float lpgRatio = firstEchoLpg / secondEchoLpg;
+
+    assert(lpgRatio > dryRatio * 1.5f);
+    std::cout << "LPG tail shaping test passed\n";
+}
+
 void testDeterminism() {
     PuddleDSP dsp1;
     PuddleDSP dsp2;
@@ -170,6 +221,7 @@ int main() {
     testAudioProcessing();
     testParameterChanges();
     testParameterSmoothing();
+    testLpgShapesWetTails();
     testDeterminism();
     testExternalDelayStorage();
     testResetRewindsState();

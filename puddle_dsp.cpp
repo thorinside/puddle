@@ -11,8 +11,8 @@ constexpr float kMinRateIntervalMs = 50.0f;
 constexpr float kMaxRateIntervalMs = 2000.0f;
 constexpr float kMinSlewTimeMs = 2.0f;
 constexpr float kMaxSlewTimeMs = 400.0f;
-constexpr float kAttackTimeMs = 5.0f;
-constexpr float kReleaseTimeMs = 100.0f;
+constexpr float kAttackTimeMs = 0.75f;
+constexpr float kReleaseTimeMs = 55.0f;
 constexpr float kUint32ToUnit = 1.0f / 4294967295.0f;
 constexpr float kMaxLinearVolume = 15.848932f;
 constexpr float kParameterSmoothingMs = 10.0f;
@@ -297,14 +297,22 @@ float PuddleDSP::filterSample(float input, float envLevel) {
     }
 
     const float nyquistLimitedMaxCutoff = std::min(20000.0f, m_config.sampleRate * 0.45f);
+    const float lpgAmount = m_smoothed.lpg;
+    const float clampedEnv = clamp(envLevel, 0.0f, 1.0f);
+    const float shapedEnv = (2.0f * clampedEnv) - (clampedEnv * clampedEnv);
+    const float baseCutoffHz = 8000.0f - (6800.0f * lpgAmount);
     const float cutoffHz = clamp(
-        m_filter.baseCutoffHz + (envLevel * m_smoothed.lpg * m_filter.modulationDepthHz),
-        500.0f,
+        baseCutoffHz + (shapedEnv * lpgAmount * 18000.0f),
+        350.0f,
         nyquistLimitedMaxCutoff);
 
     const float coeff = 1.0f - expApproxNegative((-kTwoPi * cutoffHz) / m_config.sampleRate);
     m_filter.state += coeff * (input - m_filter.state);
-    return m_filter.state;
+
+    // High LPG settings also let the wet level sag between transients, which makes the
+    // bright attack / murky tail contrast much easier to hear.
+    const float lpgGain = 1.0f - (lpgAmount * 0.55f * (1.0f - shapedEnv));
+    return m_filter.state * lpgGain;
 }
 
 void PuddleDSP::process(const float* input, float* output, uint32_t numSamples) {
@@ -325,9 +333,9 @@ void PuddleDSP::process(const float* input, float* output, uint32_t numSamples) 
         smoothParameters();
 
         const float inSample = input[i];
-        const float envLevel = trackEnvelope(inSample);
         const float modCV = generateRandomCV();
         const float delayedSample = readDelay(modCV);
+        const float envLevel = trackEnvelope(delayedSample);
         const float filteredSample = filterSample(delayedSample, envLevel);
 
         writeDelay(inSample + (filteredSample * feedbackAmount));
