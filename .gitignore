@@ -1,0 +1,13 @@
+.DS_Store
+
+build/
+plugins/
+release/
+*.zip
+
+.idea/
+.vscode/
+*.swp
+*.swo
+
+skills/

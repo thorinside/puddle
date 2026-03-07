@@ -1,0 +1,289 @@
+#include "puddle_dsp.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr float kTwoPi = 6.28318530717958647692f;
+constexpr float kMinDelayMs = 1.0f;
+constexpr float kMaxDelayMs = 49.0f;
+constexpr float kMinRateIntervalMs = 50.0f;
+constexpr float kMaxRateIntervalMs = 2000.0f;
+constexpr float kMinSlewTimeMs = 2.0f;
+constexpr float kMaxSlewTimeMs = 400.0f;
+constexpr float kAttackTimeMs = 5.0f;
+constexpr float kReleaseTimeMs = 100.0f;
+constexpr float kUint32ToUnit = 1.0f / 4294967295.0f;
+
+uint32_t roundToUInt(float value) {
+    return static_cast<uint32_t>(value + 0.5f);
+}
+
+float expFromDouble(float value) {
+    return static_cast<float>(std::exp(static_cast<double>(value)));
+}
+}
+
+PuddleDSP::PuddleDSP() = default;
+
+PuddleDSP::~PuddleDSP() = default;
+
+float PuddleDSP::clamp(float value, float minValue, float maxValue) {
+    return std::max(minValue, std::min(value, maxValue));
+}
+
+uint32_t PuddleDSP::requiredDelayBufferSamples(float sampleRate) {
+    const float safeSampleRate = std::max(1.0f, sampleRate);
+    return std::max<uint32_t>(2U, roundToUInt(50.0f * safeSampleRate / 1000.0f) + 2U);
+}
+
+void PuddleDSP::initialize(const Config& config) {
+#ifdef PUDDLE_NO_HEAP
+    (void)config;
+    m_delay.buffer = nullptr;
+    m_delay.size = 0;
+    m_initialized = false;
+#else
+    m_ownedDelayBuffer.assign(requiredDelayBufferSamples(config.sampleRate), 0.0f);
+    initialize(config, m_ownedDelayBuffer.data(), static_cast<uint32_t>(m_ownedDelayBuffer.size()));
+#endif
+}
+
+void PuddleDSP::initialize(const Config& config, float* delayBuffer, uint32_t delayBufferSamples) {
+    m_config = config;
+    m_config.sampleRate = std::max(1.0f, config.sampleRate);
+    m_config.rate = clamp(config.rate, 0.0f, 1.0f);
+    m_config.damp = clamp(config.damp, 0.0f, 1.0f);
+    m_config.depth = clamp(config.depth, 0.0f, 1.0f);
+    m_config.lpg = clamp(config.lpg, 0.0f, 1.0f);
+    m_config.mix = clamp(config.mix, 0.0f, 1.0f);
+    m_config.volume = clamp(config.volume, 0.0f, 2.0f);
+
+    const uint32_t requiredSamples = requiredDelayBufferSamples(m_config.sampleRate);
+    if (delayBuffer == nullptr || delayBufferSamples < requiredSamples) {
+        m_delay.buffer = nullptr;
+        m_delay.size = 0;
+        m_initialized = false;
+        return;
+    }
+
+    m_delay.buffer = delayBuffer;
+    m_delay.size = delayBufferSamples;
+    m_delay.writePos = 0;
+    m_delay.baseDelayMs = 35.0f;
+    m_delay.maxModulationMs = 15.0f;
+
+    m_filter.state = 0.0f;
+    m_filter.baseCutoffHz = 8000.0f;
+    m_filter.modulationDepthHz = 12000.0f;
+
+    m_initialized = true;
+    updateDerivedState();
+    reset();
+}
+
+void PuddleDSP::setRate(float value) {
+    m_config.rate = clamp(value, 0.0f, 1.0f);
+    if (m_initialized) {
+        updateRandomInterval();
+    }
+}
+
+void PuddleDSP::setDamp(float value) {
+    m_config.damp = clamp(value, 0.0f, 1.0f);
+    if (m_initialized) {
+        updateRandomSlew();
+    }
+}
+
+void PuddleDSP::setDepth(float value) {
+    m_config.depth = clamp(value, 0.0f, 1.0f);
+}
+
+void PuddleDSP::setLpg(float value) {
+    m_config.lpg = clamp(value, 0.0f, 1.0f);
+}
+
+void PuddleDSP::setMix(float value) {
+    m_config.mix = clamp(value, 0.0f, 1.0f);
+}
+
+void PuddleDSP::setVolume(float value) {
+    m_config.volume = clamp(value, 0.0f, 2.0f);
+}
+
+void PuddleDSP::updateDerivedState() {
+    updateRandomInterval();
+    updateRandomSlew();
+    updateEnvelopeCoefficients();
+}
+
+void PuddleDSP::updateRandomInterval() {
+    const float targetIntervalMs =
+        kMaxRateIntervalMs - (m_config.rate * (kMaxRateIntervalMs - kMinRateIntervalMs));
+    const float intervalSamples = targetIntervalMs * m_config.sampleRate / 1000.0f;
+    m_randomCV.updateInterval = std::max<uint32_t>(1U, roundToUInt(intervalSamples));
+    if (m_randomCV.samplesUntilUpdate > m_randomCV.updateInterval) {
+        m_randomCV.samplesUntilUpdate = m_randomCV.updateInterval;
+    }
+}
+
+void PuddleDSP::updateRandomSlew() {
+    const float slewTimeMs =
+        kMinSlewTimeMs + (m_config.damp * (kMaxSlewTimeMs - kMinSlewTimeMs));
+    const float slewSamples = std::max(1.0f, slewTimeMs * m_config.sampleRate / 1000.0f);
+    m_randomCV.slewRate = 1.0f - expFromDouble(-1.0f / slewSamples);
+}
+
+void PuddleDSP::updateEnvelopeCoefficients() {
+    const float attackSamples = std::max(1.0f, kAttackTimeMs * m_config.sampleRate / 1000.0f);
+    const float releaseSamples = std::max(1.0f, kReleaseTimeMs * m_config.sampleRate / 1000.0f);
+    m_envFollower.attackCoeff = 1.0f - expFromDouble(-1.0f / attackSamples);
+    m_envFollower.releaseCoeff = 1.0f - expFromDouble(-1.0f / releaseSamples);
+}
+
+void PuddleDSP::clearDelayBuffer() {
+    if (m_delay.buffer == nullptr || m_delay.size == 0U) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < m_delay.size; ++i) {
+        m_delay.buffer[i] = 0.0f;
+    }
+}
+
+float PuddleDSP::readDelay(float modulation) const {
+    if (!m_initialized || m_delay.buffer == nullptr || m_delay.size == 0U) {
+        return 0.0f;
+    }
+
+    const float baseDelaySamples = m_delay.baseDelayMs * m_config.sampleRate / 1000.0f;
+    const float modulationSamples =
+        modulation * m_config.depth * m_delay.maxModulationMs * m_config.sampleRate / 1000.0f;
+
+    const float totalDelay =
+        clamp(baseDelaySamples + modulationSamples,
+              kMinDelayMs * m_config.sampleRate / 1000.0f,
+              kMaxDelayMs * m_config.sampleRate / 1000.0f);
+
+    const uint32_t delayInt = static_cast<uint32_t>(totalDelay);
+    const float frac = totalDelay - static_cast<float>(delayInt);
+
+    const uint32_t newerIndex =
+        (m_delay.writePos + m_delay.size - delayInt) % m_delay.size;
+    const uint32_t olderIndex =
+        (newerIndex + m_delay.size - 1U) % m_delay.size;
+
+    const float newerSample = m_delay.buffer[newerIndex];
+    const float olderSample = m_delay.buffer[olderIndex];
+    return (newerSample * (1.0f - frac)) + (olderSample * frac);
+}
+
+void PuddleDSP::writeDelay(float sample) {
+    if (!m_initialized || m_delay.buffer == nullptr || m_delay.size == 0U) {
+        return;
+    }
+
+    m_delay.buffer[m_delay.writePos] = sample;
+    m_delay.writePos = (m_delay.writePos + 1U) % m_delay.size;
+}
+
+float PuddleDSP::nextRandomSigned() {
+    m_randomCV.state = (m_randomCV.state * 1664525U) + 1013904223U;
+    return (static_cast<float>(m_randomCV.state) * kUint32ToUnit * 2.0f) - 1.0f;
+}
+
+float PuddleDSP::generateRandomCV() {
+    if (!m_initialized) {
+        return 0.0f;
+    }
+
+    if (m_randomCV.samplesUntilUpdate == 0U) {
+        m_randomCV.targetValue = nextRandomSigned();
+        m_randomCV.samplesUntilUpdate = m_randomCV.updateInterval;
+    } else {
+        --m_randomCV.samplesUntilUpdate;
+    }
+
+    m_randomCV.currentValue +=
+        (m_randomCV.targetValue - m_randomCV.currentValue) * m_randomCV.slewRate;
+
+    return m_randomCV.currentValue;
+}
+
+float PuddleDSP::trackEnvelope(float inputSample) {
+    if (!m_initialized) {
+        return 0.0f;
+    }
+
+    const float absInput = std::fabs(inputSample);
+    const float coeff = (absInput > m_envFollower.level)
+        ? m_envFollower.attackCoeff
+        : m_envFollower.releaseCoeff;
+
+    m_envFollower.level += (absInput - m_envFollower.level) * coeff;
+    return m_envFollower.level;
+}
+
+float PuddleDSP::filterSample(float input, float envLevel) {
+    if (!m_initialized) {
+        return input;
+    }
+
+    const float nyquistLimitedMaxCutoff = std::min(20000.0f, m_config.sampleRate * 0.45f);
+    const float cutoffHz = clamp(
+        m_filter.baseCutoffHz + (envLevel * m_config.lpg * m_filter.modulationDepthHz),
+        500.0f,
+        nyquistLimitedMaxCutoff);
+
+    const float coeff = 1.0f - expFromDouble((-kTwoPi * cutoffHz) / m_config.sampleRate);
+    m_filter.state += coeff * (input - m_filter.state);
+    return m_filter.state;
+}
+
+void PuddleDSP::process(const float* input, float* output, uint32_t numSamples) {
+    if (input == nullptr || output == nullptr) {
+        return;
+    }
+
+    if (!m_initialized) {
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            output[i] = input[i];
+        }
+        return;
+    }
+
+    const float feedbackAmount = 0.15f;
+    const float dryGain = 1.0f - m_config.mix;
+    const float wetGain = m_config.mix;
+
+    for (uint32_t i = 0; i < numSamples; ++i) {
+        const float inSample = input[i];
+        const float envLevel = trackEnvelope(inSample);
+        const float modCV = generateRandomCV();
+        const float delayedSample = readDelay(modCV);
+        const float filteredSample = filterSample(delayedSample, envLevel);
+
+        writeDelay(inSample + (filteredSample * feedbackAmount));
+
+        const float mixedSample = (inSample * dryGain) + (filteredSample * wetGain);
+        output[i] = mixedSample * m_config.volume;
+    }
+}
+
+void PuddleDSP::reset() {
+    if (!m_initialized) {
+        return;
+    }
+
+    clearDelayBuffer();
+    m_delay.writePos = 0;
+
+    m_randomCV.state = m_config.randomSeed;
+    m_randomCV.currentValue = 0.0f;
+    m_randomCV.targetValue = 0.0f;
+    m_randomCV.samplesUntilUpdate = 0;
+
+    m_envFollower.level = 0.0f;
+    m_filter.state = 0.0f;
+}

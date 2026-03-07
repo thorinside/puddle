@@ -1,0 +1,58 @@
+name: Build and Release Puddle Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install ARM toolchain
+        run: |
+          brew update
+          brew install --cask gcc-arm-embedded
+
+      - name: Verify installation
+        run: arm-none-eabi-g++ --version
+
+      - name: Run DSP tests
+        run: |
+          make clean
+          make test
+
+      - name: Build plugin
+        run: |
+          make clean
+          make hardware
+          make check
+
+      - name: Prepare release archive
+        run: |
+          mkdir -p release/programs/plug-ins/puddle
+          cp plugins/nt_puddle.o release/programs/plug-ins/puddle/puddle.o
+          cd release
+          zip -r ../puddle-plugin.zip programs
+          cd ..
+          echo "Archive contents:"
+          unzip -l puddle-plugin.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: puddle-plugin.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
