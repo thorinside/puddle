@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <distingnt/api.h>
 
@@ -58,6 +59,11 @@ static const _NT_parameterPages parameterPages = {
 struct _puddleAlgorithm : public _NT_algorithm {
     PuddleDSP dsp;
 };
+
+static void accumulateProcessed(float* output,
+                                const float* input,
+                                uint32_t numFrames,
+                                PuddleDSP& dsp);
 
 void calculateRequirements(_NT_algorithmRequirements& req, const int32_t* specifications) {
     (void)specifications;
@@ -145,11 +151,7 @@ void step(_NT_algorithm* self, float* busFrames, int numFramesBy4) {
         return;
     }
 
-    for (uint32_t i = 0; i < numFrames; ++i) {
-        float wet = 0.0f;
-        pThis->dsp.process(input + i, &wet, 1U);
-        output[i] += wet;
-    }
+    accumulateProcessed(output, input, numFrames, pThis->dsp);
 }
 
 bool draw(_NT_algorithm* self) {
@@ -184,6 +186,34 @@ bool draw(_NT_algorithm* self) {
     NT_drawText(160, 48, buf);
 
     return false;
+}
+
+static void accumulateProcessed(float* output,
+                                const float* input,
+                                uint32_t numFrames,
+                                PuddleDSP& dsp) {
+    float localScratch[64];
+    float* scratch = localScratch;
+    uint32_t scratchCapacity = ARRAY_SIZE(localScratch);
+
+    if (NT_globals.workBuffer != nullptr) {
+        const uint32_t workFrames =
+            NT_globals.workBufferSizeBytes / static_cast<uint32_t>(sizeof(float));
+        if (workFrames > 0U) {
+            scratch = NT_globals.workBuffer;
+            scratchCapacity = workFrames;
+        }
+    }
+
+    uint32_t offset = 0U;
+    while (offset < numFrames) {
+        const uint32_t framesThisPass = std::min(scratchCapacity, numFrames - offset);
+        dsp.process(input + offset, scratch, framesThisPass);
+        for (uint32_t i = 0; i < framesThisPass; ++i) {
+            output[offset + i] += scratch[i];
+        }
+        offset += framesThisPass;
+    }
 }
 
 static const _NT_factory factory = {

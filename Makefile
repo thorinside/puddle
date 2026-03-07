@@ -52,6 +52,17 @@ ifeq ($(TARGET),plugin-test)
 	SIZE_CMD := ls -lh $(OUTPUT)
 endif
 
+PLUGIN_TEST_OUTPUT :=
+ifeq ($(UNAME_S),Darwin)
+	PLUGIN_TEST_OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).dylib
+endif
+ifeq ($(UNAME_S),Linux)
+	PLUGIN_TEST_OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).so
+endif
+ifeq ($(OS),Windows_NT)
+	PLUGIN_TEST_OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).dll
+endif
+
 .PHONY: all test hardware plugin-test clean check size
 
 all: test
@@ -76,7 +87,7 @@ hardware:
 	@$(MAKE) TARGET=hardware $(OUTPUT)
 
 plugin-test:
-	@$(MAKE) TARGET=plugin-test $(OUTPUT)
+	@$(MAKE) TARGET=plugin-test $(PLUGIN_TEST_OUTPUT)
 
 check: $(OUTPUT)
 	@$(CHECK_CMD)
