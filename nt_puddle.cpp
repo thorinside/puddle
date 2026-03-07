@@ -72,8 +72,12 @@ static const _NT_parameterPages parameterPages = {
     .pages = pages,
 };
 
-struct _puddleAlgorithm : public _NT_algorithm {
+struct _puddleAlgorithmDTC {
     PuddleDSP dsp;
+};
+
+struct _puddleAlgorithm : public _NT_algorithm {
+    _puddleAlgorithmDTC* dtc;
 };
 
 static void accumulateProcessed(float* output,
@@ -87,7 +91,7 @@ void calculateRequirements(_NT_algorithmRequirements& req, const int32_t* specif
     req.numParameters = ARRAY_SIZE(parameters);
     req.sram = sizeof(_puddleAlgorithm);
     req.dram = requiredDelayBytes(effectiveSampleRate());
-    req.dtc = 0;
+    req.dtc = sizeof(_puddleAlgorithmDTC);
     req.itc = 0;
 }
 
@@ -98,6 +102,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     (void)specifications;
 
     _puddleAlgorithm* alg = new (ptrs.sram) _puddleAlgorithm();
+    alg->dtc = new (ptrs.dtc) _puddleAlgorithmDTC();
     alg->parameters = parameters;
     alg->parameterPages = &parameterPages;
 
@@ -114,7 +119,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 
     const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(sampleRate);
-    alg->dsp.initialize(config, reinterpret_cast<float*>(ptrs.dram), delaySamples);
+    alg->dtc->dsp.initialize(config, reinterpret_cast<float*>(ptrs.dram), delaySamples);
     return alg;
 }
 
@@ -123,22 +128,22 @@ void parameterChanged(_NT_algorithm* self, int p) {
 
     switch (p) {
     case kParamRate:
-        pThis->dsp.setRate(pThis->v[kParamRate] / 100.0f);
+        pThis->dtc->dsp.setRate(pThis->v[kParamRate] / 100.0f);
         break;
     case kParamDamp:
-        pThis->dsp.setDamp(pThis->v[kParamDamp] / 100.0f);
+        pThis->dtc->dsp.setDamp(pThis->v[kParamDamp] / 100.0f);
         break;
     case kParamDepth:
-        pThis->dsp.setDepth(pThis->v[kParamDepth] / 100.0f);
+        pThis->dtc->dsp.setDepth(pThis->v[kParamDepth] / 100.0f);
         break;
     case kParamLpg:
-        pThis->dsp.setLpg(pThis->v[kParamLpg] / 100.0f);
+        pThis->dtc->dsp.setLpg(pThis->v[kParamLpg] / 100.0f);
         break;
     case kParamMix:
-        pThis->dsp.setMix(pThis->v[kParamMix] / 100.0f);
+        pThis->dtc->dsp.setMix(pThis->v[kParamMix] / 100.0f);
         break;
     case kParamVolume:
-        pThis->dsp.setVolume(pThis->v[kParamVolume] / 100.0f);
+        pThis->dtc->dsp.setVolume(pThis->v[kParamVolume] / 100.0f);
         break;
     default:
         break;
@@ -157,11 +162,11 @@ void step(_NT_algorithm* self, float* busFrames, int numFramesBy4) {
     const bool replaceMode = pThis->v[kParamOutputMode] != 0;
 
     if (replaceMode) {
-        pThis->dsp.process(input, output, numFrames);
+        pThis->dtc->dsp.process(input, output, numFrames);
         return;
     }
 
-    accumulateProcessed(output, input, numFrames, pThis->dsp);
+    accumulateProcessed(output, input, numFrames, pThis->dtc->dsp);
 }
 
 bool draw(_NT_algorithm* self) {
