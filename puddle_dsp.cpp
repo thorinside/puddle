@@ -14,6 +14,7 @@ constexpr float kMaxSlewTimeMs = 400.0f;
 constexpr float kAttackTimeMs = 5.0f;
 constexpr float kReleaseTimeMs = 100.0f;
 constexpr float kUint32ToUnit = 1.0f / 4294967295.0f;
+constexpr float kMaxLinearVolume = 15.848932f;
 
 uint32_t roundToUInt(float value) {
     return static_cast<uint32_t>(value + 0.5f);
@@ -76,7 +77,7 @@ void PuddleDSP::initialize(const Config& config, float* delayBuffer, uint32_t de
     m_config.depth = clamp(config.depth, 0.0f, 1.0f);
     m_config.lpg = clamp(config.lpg, 0.0f, 1.0f);
     m_config.mix = clamp(config.mix, 0.0f, 1.0f);
-    m_config.volume = clamp(config.volume, 0.0f, 2.0f);
+    m_config.volume = clamp(config.volume, 0.0f, kMaxLinearVolume);
 
     const uint32_t requiredSamples = requiredDelayBufferSamples(m_config.sampleRate);
     if (delayBuffer == nullptr || delayBufferSamples < requiredSamples) {
@@ -128,7 +129,7 @@ void PuddleDSP::setMix(float value) {
 }
 
 void PuddleDSP::setVolume(float value) {
-    m_config.volume = clamp(value, 0.0f, 2.0f);
+    m_config.volume = clamp(value, 0.0f, kMaxLinearVolume);
 }
 
 void PuddleDSP::updateDerivedState() {

@@ -22,6 +22,11 @@ enum {
 namespace {
 constexpr float kDefaultSampleRateHz = 48000.0f;
 constexpr float kMaxSupportedSampleRateHz = 96000.0f;
+constexpr int kMinVolumeDbTenths = -600;
+constexpr int kDefaultVolumeDbTenths = -100;
+constexpr int kMaxVolumeDbTenths = 240;
+constexpr float kLn10Over20 = 0.11512925464970228f;
+constexpr float kLn2 = 0.6931471805599453f;
 
 float effectiveSampleRate() {
     const float raw = (NT_globals.sampleRate > 0U)
@@ -32,6 +37,56 @@ float effectiveSampleRate() {
 
 uint32_t requiredDelayBytes(float sampleRate) {
     return PuddleDSP::requiredDelayBufferSamples(sampleRate) * sizeof(float);
+}
+
+float expApprox(float value) {
+    const float scaled = value / kLn2;
+    int exponent = static_cast<int>(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f));
+    const float remainder = value - (static_cast<float>(exponent) * kLn2);
+    const float r2 = remainder * remainder;
+    float result =
+        1.0f + remainder + (0.5f * r2) + ((r2 * remainder) * (1.0f / 6.0f)) +
+        ((r2 * r2) * (1.0f / 24.0f)) + ((r2 * r2 * remainder) * (1.0f / 120.0f));
+
+    while (exponent > 0) {
+        result *= 2.0f;
+        --exponent;
+    }
+    while (exponent < 0) {
+        result *= 0.5f;
+        ++exponent;
+    }
+    return result;
+}
+
+float volumeDbTenthsToLinear(int valueTenthsDb) {
+    return expApprox(static_cast<float>(valueTenthsDb) * 0.1f * kLn10Over20);
+}
+
+void formatTenthsDb(char* buffer, int valueTenthsDb) {
+    char* out = buffer;
+    int value = valueTenthsDb;
+    if (value < 0) {
+        *out++ = '-';
+        value = -value;
+    }
+
+    int whole = value / 10;
+    const int frac = value % 10;
+    char digits[8];
+    int numDigits = 0;
+    do {
+        digits[numDigits++] = static_cast<char>('0' + (whole % 10));
+        whole /= 10;
+    } while (whole > 0);
+
+    while (numDigits > 0) {
+        *out++ = digits[--numDigits];
+    }
+
+    *out++ = '.';
+    *out++ = static_cast<char>('0' + frac);
+    *out = '\0';
 }
 }
 
@@ -44,7 +99,8 @@ static const _NT_parameter parameters[] = {
     { .name = "DEPTH", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
     { .name = "LPG", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
     { .name = "MIX", .min = 0, .max = 100, .def = 50, .unit = kNT_unitPercent },
-    { .name = "VOLUME", .min = 0, .max = 200, .def = 100, .unit = kNT_unitPercent },
+    { .name = "VOLUME", .min = kMinVolumeDbTenths, .max = kMaxVolumeDbTenths,
+      .def = kDefaultVolumeDbTenths, .unit = kNT_unitDb, .scaling = kNT_scaling10 },
 };
 
 static const uint8_t pageMain[] = {
@@ -115,7 +171,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.depth = 0.5f;
     config.lpg = 0.5f;
     config.mix = 0.5f;
-    config.volume = 1.0f;
+    config.volume = volumeDbTenthsToLinear(kDefaultVolumeDbTenths);
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 
     const uint32_t delaySamples = PuddleDSP::requiredDelayBufferSamples(sampleRate);
@@ -143,7 +199,7 @@ void parameterChanged(_NT_algorithm* self, int p) {
         pThis->dtc->dsp.setMix(pThis->v[kParamMix] / 100.0f);
         break;
     case kParamVolume:
-        pThis->dtc->dsp.setVolume(pThis->v[kParamVolume] / 100.0f);
+        pThis->dtc->dsp.setVolume(volumeDbTenthsToLinear(pThis->v[kParamVolume]));
         break;
     default:
         break;
@@ -197,7 +253,7 @@ bool draw(_NT_algorithm* self) {
     NT_drawText(32, 48, buf);
 
     NT_drawText(128, 48, "VOL:");
-    NT_intToString(buf, pThis->v[kParamVolume]);
+    formatTenthsDb(buf, pThis->v[kParamVolume]);
     NT_drawText(160, 48, buf);
 
     return false;
