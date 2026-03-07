@@ -24,6 +24,7 @@ constexpr float kDefaultSampleRateHz = 48000.0f;
 constexpr float kMaxSupportedSampleRateHz = 96000.0f;
 constexpr int kMinPercentHundredths = 0;
 constexpr int kDefaultPercentHundredths = 5000;
+constexpr int kDefaultMixPercentHundredths = 10000;
 constexpr int kMaxPercentHundredths = 10000;
 constexpr int kMinVolumeDbHundredths = -6000;
 constexpr int kDefaultVolumeDbHundredths = -1000;
@@ -111,7 +112,7 @@ static const _NT_parameter parameters[] = {
     { .name = "LPG", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
     { .name = "MIX", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
-      .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+      .def = kDefaultMixPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
     { .name = "VOLUME", .min = kMinVolumeDbHundredths, .max = kMaxVolumeDbHundredths,
       .def = kDefaultVolumeDbHundredths, .unit = kNT_unitDb, .scaling = kNT_scaling100 },
 };
@@ -183,7 +184,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.damp = 0.5f;
     config.depth = 0.5f;
     config.lpg = 0.5f;
-    config.mix = 0.5f;
+    config.mix = 1.0f;
     config.volume = volumeDbHundredthsToLinear(kDefaultVolumeDbHundredths);
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
 

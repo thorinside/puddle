@@ -63,7 +63,7 @@ ifeq ($(OS),Windows_NT)
 	PLUGIN_TEST_OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).dll
 endif
 
-.PHONY: all test hardware plugin-test clean check size
+.PHONY: all test hardware plugin-test clean check size push
 
 all: test
 
@@ -103,6 +103,9 @@ check: $(OUTPUT)
 
 size: $(OUTPUT)
 	@$(SIZE_CMD)
+
+push: hardware
+	ntpush $(PLUGIN_DIR)/$(PLUGIN_NAME).o
 
 clean:
 	rm -rf $(BUILD_DIR) $(PLUGIN_DIR)
