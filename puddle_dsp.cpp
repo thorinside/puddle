@@ -15,7 +15,10 @@ constexpr float kAttackTimeMs = 0.75f;
 constexpr float kReleaseTimeMs = 55.0f;
 constexpr float kUint32ToUnit = 1.0f / 4294967295.0f;
 constexpr float kMaxLinearVolume = 15.848932f;
+constexpr float kMaxFeedback = 0.95f;
+constexpr float kDCBlockerR = 0.9975f;
 constexpr float kParameterSmoothingMs = 10.0f;
+constexpr float kPiOver2 = 1.57079632679489661923f;
 
 uint32_t roundToUInt(float value) {
     return static_cast<uint32_t>(value + 0.5f);
@@ -94,6 +97,7 @@ void PuddleDSP::initialize(const Config& config, float* delayBuffer, uint32_t de
     m_config.damp = clamp(config.damp, 0.0f, 1.0f);
     m_config.depth = clamp(config.depth, 0.0f, 1.0f);
     m_config.lpg = clamp(config.lpg, 0.0f, 1.0f);
+    m_config.feedback = clamp(config.feedback, 0.0f, kMaxFeedback);
     m_config.mix = clamp(config.mix, 0.0f, 1.0f);
     m_config.volume = clamp(config.volume, 0.0f, kMaxLinearVolume);
 
@@ -115,6 +119,9 @@ void PuddleDSP::initialize(const Config& config, float* delayBuffer, uint32_t de
     m_filter.baseCutoffHz = 8000.0f;
     m_filter.modulationDepthHz = 12000.0f;
 
+    m_dcBlocker.x1 = 0.0f;
+    m_dcBlocker.y1 = 0.0f;
+
     syncSmoothedParameters();
     m_initialized = true;
     updateDerivedState();
@@ -135,6 +142,10 @@ void PuddleDSP::setDepth(float value) {
 
 void PuddleDSP::setLpg(float value) {
     m_config.lpg = clamp(value, 0.0f, 1.0f);
+}
+
+void PuddleDSP::setFeedback(float value) {
+    m_config.feedback = clamp(value, 0.0f, kMaxFeedback);
 }
 
 void PuddleDSP::setMix(float value) {
@@ -187,6 +198,7 @@ void PuddleDSP::syncSmoothedParameters() {
     m_smoothed.damp = m_config.damp;
     m_smoothed.depth = m_config.depth;
     m_smoothed.lpg = m_config.lpg;
+    m_smoothed.feedback = m_config.feedback;
     m_smoothed.mix = m_config.mix;
     m_smoothed.volume = m_config.volume;
 }
@@ -197,6 +209,7 @@ void PuddleDSP::smoothParameters() {
 
     smoothToward(m_smoothed.depth, m_config.depth, m_smoothed.coeff);
     smoothToward(m_smoothed.lpg, m_config.lpg, m_smoothed.coeff);
+    smoothToward(m_smoothed.feedback, m_config.feedback, m_smoothed.coeff);
     smoothToward(m_smoothed.mix, m_config.mix, m_smoothed.coeff);
     smoothToward(m_smoothed.volume, m_config.volume, m_smoothed.coeff);
 
@@ -315,6 +328,23 @@ float PuddleDSP::filterSample(float input, float envLevel) {
     return m_filter.state * lpgGain;
 }
 
+float PuddleDSP::blockDC(float input) {
+    const float y = input - m_dcBlocker.x1 + kDCBlockerR * m_dcBlocker.y1;
+    m_dcBlocker.x1 = input;
+    m_dcBlocker.y1 = y;
+    return y;
+}
+
+float PuddleDSP::softClip(float input) {
+    if (input > 1.0f) {
+        return 1.0f - (1.0f / (1.0f + (input - 1.0f)));
+    }
+    if (input < -1.0f) {
+        return -1.0f + (1.0f / (1.0f - (input + 1.0f)));
+    }
+    return input;
+}
+
 void PuddleDSP::process(const float* input, float* output, uint32_t numSamples) {
     if (input == nullptr || output == nullptr) {
         return;
@@ -327,22 +357,22 @@ void PuddleDSP::process(const float* input, float* output, uint32_t numSamples) 
         return;
     }
 
-    const float feedbackAmount = 0.15f;
-
     for (uint32_t i = 0; i < numSamples; ++i) {
         smoothParameters();
 
         const float inSample = input[i];
+        const float envLevel = trackEnvelope(inSample);
         const float modCV = generateRandomCV();
         const float delayedSample = readDelay(modCV);
-        const float envLevel = trackEnvelope(delayedSample);
         const float filteredSample = filterSample(delayedSample, envLevel);
 
-        writeDelay(inSample + (filteredSample * feedbackAmount));
+        const float fbSignal = blockDC(softClip(filteredSample * m_smoothed.feedback));
+        writeDelay(inSample + fbSignal);
 
-        const float dryGain = 1.0f - m_smoothed.mix;
-        const float wetGain = m_smoothed.mix;
-        const float mixedSample = (inSample * dryGain) + (filteredSample * wetGain);
+        const float mixAngle = m_smoothed.mix * kPiOver2;
+        const float sinMix = std::sin(mixAngle);
+        const float cosMix = std::cos(mixAngle);
+        const float mixedSample = (inSample * cosMix) + (filteredSample * sinMix);
         output[i] = mixedSample * m_smoothed.volume;
     }
 }
@@ -362,6 +392,8 @@ void PuddleDSP::reset() {
 
     m_envFollower.level = 0.0f;
     m_filter.state = 0.0f;
+    m_dcBlocker.x1 = 0.0f;
+    m_dcBlocker.y1 = 0.0f;
     syncSmoothedParameters();
     updateRandomInterval();
     updateRandomSlew();

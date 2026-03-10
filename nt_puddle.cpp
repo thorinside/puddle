@@ -14,6 +14,7 @@ enum {
     kParamDamp,
     kParamDepth,
     kParamLpg,
+    kParamFeedback,
     kParamMix,
     kParamVolume,
     kNumParams
@@ -26,6 +27,8 @@ constexpr int kMinPercentHundredths = 0;
 constexpr int kDefaultPercentHundredths = 5000;
 constexpr int kDefaultMixPercentHundredths = 10000;
 constexpr int kMaxPercentHundredths = 10000;
+constexpr int kDefaultFeedbackPercentHundredths = 1500;
+constexpr int kMaxFeedbackPercentHundredths = 9500;
 constexpr int kMinVolumeDbHundredths = -6000;
 constexpr int kDefaultVolumeDbHundredths = -1000;
 constexpr int kMaxVolumeDbHundredths = 2400;
@@ -103,25 +106,31 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Input", 1, 1)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output", 1, 13)
 
-    { .name = "RATE", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+    { .name = "Rate", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
-    { .name = "DAMP", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+    { .name = "Damping", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
-    { .name = "DEPTH", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+    { .name = "Depth", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
     { .name = "LPG", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
-    { .name = "MIX", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
+    { .name = "Feedback", .min = kMinPercentHundredths, .max = kMaxFeedbackPercentHundredths,
+      .def = kDefaultFeedbackPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
+    { .name = "Mix", .min = kMinPercentHundredths, .max = kMaxPercentHundredths,
       .def = kDefaultMixPercentHundredths, .unit = kNT_unitPercent, .scaling = kNT_scaling100 },
-    { .name = "VOLUME", .min = kMinVolumeDbHundredths, .max = kMaxVolumeDbHundredths,
+    { .name = "Volume", .min = kMinVolumeDbHundredths, .max = kMaxVolumeDbHundredths,
       .def = kDefaultVolumeDbHundredths, .unit = kNT_unitDb, .scaling = kNT_scaling100 },
 };
 
-static const uint8_t pageMain[] = {
+static const uint8_t pagePuddle[] = {
     kParamRate,
-    kParamDamp,
     kParamDepth,
+    kParamDamp,
     kParamLpg,
+    kParamFeedback,
+};
+
+static const uint8_t pageOutput[] = {
     kParamMix,
     kParamVolume,
 };
@@ -133,7 +142,8 @@ static const uint8_t pageRouting[] = {
 };
 
 static const _NT_parameterPage pages[] = {
-    { .name = "Main", .numParams = ARRAY_SIZE(pageMain), .params = pageMain },
+    { .name = "Puddle", .numParams = ARRAY_SIZE(pagePuddle), .params = pagePuddle },
+    { .name = "Output", .numParams = ARRAY_SIZE(pageOutput), .params = pageOutput },
     { .name = "Routing", .numParams = ARRAY_SIZE(pageRouting), .params = pageRouting },
 };
 
@@ -184,6 +194,7 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs,
     config.damp = 0.5f;
     config.depth = 0.5f;
     config.lpg = 0.5f;
+    config.feedback = 0.15f;
     config.mix = 1.0f;
     config.volume = volumeDbHundredthsToLinear(kDefaultVolumeDbHundredths);
     config.randomSeed = 0x5044444CU ^ static_cast<uint32_t>(sampleRate);
@@ -208,6 +219,9 @@ void parameterChanged(_NT_algorithm* self, int p) {
         break;
     case kParamLpg:
         pThis->dtc->dsp.setLpg(percentHundredthsToUnit(pThis->v[kParamLpg]));
+        break;
+    case kParamFeedback:
+        pThis->dtc->dsp.setFeedback(percentHundredthsToUnit(pThis->v[kParamFeedback]));
         break;
     case kParamMix:
         pThis->dtc->dsp.setMix(percentHundredthsToUnit(pThis->v[kParamMix]));
@@ -246,29 +260,33 @@ bool draw(_NT_algorithm* self) {
 
     char buf[24];
 
-    NT_drawText(0, 24, "RATE:");
+    NT_drawText(0, 24, "Rate:");
     formatHundredths(buf, pThis->v[kParamRate]);
     NT_drawText(40, 24, buf);
 
-    NT_drawText(128, 24, "DAMP:");
-    formatHundredths(buf, pThis->v[kParamDamp]);
+    NT_drawText(128, 24, "Depth:");
+    formatHundredths(buf, pThis->v[kParamDepth]);
     NT_drawText(168, 24, buf);
 
-    NT_drawText(0, 36, "DEPTH:");
-    formatHundredths(buf, pThis->v[kParamDepth]);
-    NT_drawText(48, 36, buf);
+    NT_drawText(0, 36, "Damp:");
+    formatHundredths(buf, pThis->v[kParamDamp]);
+    NT_drawText(40, 36, buf);
 
     NT_drawText(128, 36, "LPG:");
     formatHundredths(buf, pThis->v[kParamLpg]);
     NT_drawText(160, 36, buf);
 
-    NT_drawText(0, 48, "MIX:");
-    formatHundredths(buf, pThis->v[kParamMix]);
-    NT_drawText(32, 48, buf);
+    NT_drawText(0, 48, "FB:");
+    formatHundredths(buf, pThis->v[kParamFeedback]);
+    NT_drawText(24, 48, buf);
 
-    NT_drawText(128, 48, "VOL:");
+    NT_drawText(85, 48, "Mix:");
+    formatHundredths(buf, pThis->v[kParamMix]);
+    NT_drawText(112, 48, buf);
+
+    NT_drawText(170, 48, "Vol:");
     formatHundredths(buf, pThis->v[kParamVolume]);
-    NT_drawText(160, 48, buf);
+    NT_drawText(194, 48, buf);
 
     return false;
 }

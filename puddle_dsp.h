@@ -14,6 +14,7 @@ public:
         float damp = 0.5f;
         float depth = 0.5f;
         float lpg = 0.5f;
+        float feedback = 0.15f;
         float mix = 0.5f;
         float volume = 1.0f;
         uint32_t randomSeed = 0x5044444Cu;
@@ -30,6 +31,7 @@ public:
     void setDamp(float value);
     void setDepth(float value);
     void setLpg(float value);
+    void setFeedback(float value);
     void setMix(float value);
     void setVolume(float value);
 
@@ -66,11 +68,17 @@ private:
         float modulationDepthHz = 12000.0f;
     };
 
+    struct DCBlocker {
+        float x1 = 0.0f;
+        float y1 = 0.0f;
+    };
+
     struct SmoothedParameters {
         float rate = 0.5f;
         float damp = 0.5f;
         float depth = 0.5f;
         float lpg = 0.5f;
+        float feedback = 0.15f;
         float mix = 0.5f;
         float volume = 1.0f;
         float coeff = 1.0f;
@@ -92,6 +100,8 @@ private:
     float generateRandomCV();
     float trackEnvelope(float inputSample);
     float filterSample(float input, float envLevel);
+    float blockDC(float input);
+    static float softClip(float input);
     float nextRandomSigned();
 
     Config m_config;
@@ -99,6 +109,7 @@ private:
     RandomCVGenerator m_randomCV;
     EnvelopeFollower m_envFollower;
     LowPassFilter m_filter;
+    DCBlocker m_dcBlocker;
     SmoothedParameters m_smoothed;
 
 #ifndef PUDDLE_NO_HEAP
